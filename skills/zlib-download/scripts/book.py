@@ -7,7 +7,7 @@ Backends:
   - annas: Anna's Archive via annas-mcp binary
 
 All output is JSON to stdout. Errors go to stderr with non-zero exit.
-Config stored at ~/.claude/book-tools/config.json
+Config stored at ~/.config/book-tools/config.json
 """
 
 import argparse
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CONFIG_DIR = Path.home() / ".claude" / "book-tools"
+CONFIG_DIR = Path.home() / ".config" / "book-tools"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 ENV_FILE = CONFIG_DIR / ".env"
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads"
@@ -31,6 +31,14 @@ DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads"
 
 def _load_env() -> dict:
     """Load key=value pairs from .env file."""
+    def _normalize_env_value(value: str) -> str:
+        value = value.strip()
+        # Accept quoted values in .env while keeping plain values unchanged.
+        if len(value) >= 2 and ((value[0] == '"' and value[-1] == '"') or
+                                (value[0] == "'" and value[-1] == "'")):
+            return value[1:-1]
+        return value
+
     env = {}
     if ENV_FILE.exists():
         for line in ENV_FILE.read_text().splitlines():
@@ -39,7 +47,7 @@ def _load_env() -> dict:
                 continue
             if "=" in line:
                 k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
+                env[k.strip()] = _normalize_env_value(v)
     return env
 
 
@@ -81,6 +89,20 @@ def die(msg: str, hint: str = "", recoverable: bool = True):
     sys.exit(1 if recoverable else 2)
 
 
+def _with_retry(func, *args, max_retries=1, **kwargs):
+    """Run func with a single retry on recoverable errors (exit code 1)."""
+    for attempt in range(max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except SystemExit as e:
+            if e.code == 1 and attempt < max_retries:
+                # Recoverable error, retry once
+                print(json.dumps({"warning": "Retrying after transient error..."},
+                                 ensure_ascii=False), file=sys.stderr)
+                continue
+            raise
+
+
 # ---------------------------------------------------------------------------
 # Z-Library backend
 # ---------------------------------------------------------------------------
@@ -97,28 +119,40 @@ def _get_zlib():
     remix_userkey = zlib_cfg.get("remix_userkey")
     email = zlib_cfg.get("email")
     password = zlib_cfg.get("password")
+    domain = zlib_cfg.get("domain")  # configurable Z-Library domain
 
+    login_response = None
     if remix_userid and remix_userkey:
-        z = Zlibrary(remix_userid=remix_userid, remix_userkey=remix_userkey)
+        z = Zlibrary(domain=domain)
+        login_response = z.loginWithToken(remix_userid, remix_userkey)
+        if (not z.isLoggedIn()) and email and password:
+            login_response = z.login(email, password)
     elif email and password:
-        z = Zlibrary(email=email, password=password)
-        if z.isLoggedIn():
-            # Cache tokens for next time
-            profile = z.getProfile()
-            if profile and profile.get("success"):
-                user = profile["user"]
-                cfg.setdefault("zlib", {})
-                cfg["zlib"]["remix_userid"] = str(user["id"])
-                cfg["zlib"]["remix_userkey"] = user["remix_userkey"]
-                save_config(cfg)
+        z = Zlibrary(domain=domain)
+        login_response = z.login(email, password)
     else:
         die("Z-Library not configured.",
             hint="Run: book.py config set --zlib-email <email> --zlib-password <password>",
             recoverable=False)
 
+    if z.isLoggedIn():
+        # Cache tokens for next time
+        profile = z.getProfile()
+        if profile and profile.get("success"):
+            user = profile["user"]
+            cfg.setdefault("zlib", {})
+            cfg["zlib"]["remix_userid"] = str(user["id"])
+            cfg["zlib"]["remix_userkey"] = user["remix_userkey"]
+            save_config(cfg)
+
     if not z.isLoggedIn():
+        detail = ""
+        if isinstance(login_response, dict):
+            error_detail = login_response.get("error") or login_response.get("message")
+            if error_detail:
+                detail = f" Last error: {error_detail}"
         die("Z-Library login failed.",
-            hint="Check your email/password or cached tokens. Run: book.py config reset",
+            hint="Check your email/password or cached tokens. Run: book.py config reset." + detail,
             recoverable=False)
     return z
 
@@ -178,10 +212,11 @@ def zlib_download(args):
     out_dir = Path(args.output) if args.output else DEFAULT_DOWNLOAD_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    result = z._Zlibrary__getBookFile(args.id, args.hash)
+    result = z.downloadBookById(args.id, args.hash)
     if result is None:
-        die("Z-Library download failed: no file returned",
-            hint="Download quota may be exhausted or book unavailable. Try again later.",
+        die("Z-Library download failed: no file returned.",
+            hint="Possible causes: id/hash mismatch, book unavailable, quota exhausted, or network issues. "
+                 "Re-run search and download with id+hash from the same result.",
             recoverable=True)
 
     filename, content = result
@@ -189,16 +224,24 @@ def zlib_download(args):
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
     filepath = out_dir / filename
     filepath.write_bytes(content)
-    output({"source": "zlib", "status": "ok", "path": str(filepath), "size": len(content)},
-           hint=f"Downloaded to {filepath}")
+
+    # Report download quota
+    out = {"source": "zlib", "status": "ok", "path": str(filepath), "size": len(content)}
+    try:
+        downloads_left = z.getDownloadsLeft()
+        out["downloads_left"] = downloads_left
+    except Exception:
+        pass  # quota info is best-effort
+
+    output(out, hint=f"Downloaded to {filepath}")
 
 
 # ---------------------------------------------------------------------------
 # Anna's Archive backend
 # ---------------------------------------------------------------------------
 
-def _find_annas_binary() -> str:
-    """Find annas-mcp binary."""
+def _find_annas_binary(silent=False) -> str:
+    """Find annas-mcp binary. If silent=True, raise FileNotFoundError instead of die()."""
     cfg = load_config()
     custom = cfg.get("annas", {}).get("binary_path")
     if custom and Path(custom).exists():
@@ -218,12 +261,22 @@ def _find_annas_binary() -> str:
         if loc.exists():
             return str(loc)
 
+    if silent:
+        raise FileNotFoundError("annas-mcp not found")
     die(
         "annas-mcp binary not found.",
         hint="Install it: download from https://github.com/iosifache/annas-mcp/releases, "
              "extract to ~/.local/bin/annas-mcp, or run: book.py config set --annas-binary /path/to/annas-mcp",
         recoverable=False,
     )
+
+
+def _has_annas_binary() -> bool:
+    try:
+        _find_annas_binary(silent=True)
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def _annas_env() -> dict:
@@ -274,6 +327,11 @@ def _parse_annas_search_output(text: str) -> list[dict]:
 
     if current:
         books.append(current)
+
+    # Assign sequential index for easier user selection
+    for i, book in enumerate(books, 1):
+        book["index"] = i
+
     return books
 
 
@@ -373,9 +431,9 @@ def annas_download(args):
 def cmd_search(args):
     source = args.source
     if source == "zlib":
-        zlib_search(args)
+        _with_retry(zlib_search, args)
     elif source == "annas":
-        annas_search(args)
+        _with_retry(annas_search, args)
     elif source == "auto":
         # Try Z-Library first, fall back to Anna's Archive
         cfg = load_config()
@@ -406,9 +464,13 @@ def cmd_search(args):
 
 def cmd_download(args):
     if args.source == "zlib":
-        zlib_download(args)
+        if not args.id or not str(args.id).strip():
+            die("Z-Library download requires --id when --source zlib.",
+                hint="Run search first, then use both --id and --hash from the same result.",
+                recoverable=False)
+        _with_retry(zlib_download, args)
     elif args.source == "annas":
-        annas_download(args)
+        _with_retry(annas_download, args)
     else:
         die("Download requires --source (zlib or annas)",
             hint="Specify --source zlib or --source annas.",
@@ -452,6 +514,10 @@ def cmd_config(args):
             cfg["zlib"].pop("remix_userid", None)
             cfg["zlib"].pop("remix_userkey", None)
 
+        if args.zlib_domain:
+            cfg.setdefault("zlib", {})
+            cfg["zlib"]["domain"] = args.zlib_domain
+
         if args.annas_key:
             cfg.setdefault("annas", {})
             cfg["annas"]["secret_key"] = args.annas_key
@@ -481,37 +547,15 @@ def cmd_config(args):
 
 
 def cmd_setup(args):
-    """Check dependencies and report status."""
-    status = {"zlib": {}, "annas": {}}
+    """Check dependencies, credentials, and environment readiness."""
     cfg = load_config()
-
-    # Check Python requests
-    try:
-        import requests
-        status["zlib"]["requests_installed"] = True
-        status["zlib"]["requests_version"] = requests.__version__
-    except ImportError:
-        status["zlib"]["requests_installed"] = False
-
-    # Check Z-Library credentials
     zlib_cfg = cfg.get("zlib", {})
-    status["zlib"]["configured"] = bool(
-        zlib_cfg.get("email") or zlib_cfg.get("remix_userid")
-    )
+    annas_cfg = cfg.get("annas", {})
 
-    # Check annas-mcp binary
-    status["annas"]["binary_found"] = _has_annas_binary()
-    if status["annas"]["binary_found"]:
-        status["annas"]["binary_path"] = _find_annas_binary_silent()
+    zlib_configured = bool(zlib_cfg.get("email") or zlib_cfg.get("remix_userid"))
+    annas_configured = bool(annas_cfg.get("secret_key"))
+    annas_binary = _has_annas_binary()
 
-    # Check Anna's Archive API key
-    status["annas"]["api_key_configured"] = bool(cfg.get("annas", {}).get("secret_key"))
-
-    output(status)
-
-
-def cmd_preflight(args):
-    """Check environment readiness: Python version, dependencies, credentials."""
     result = {
         "ready": True,
         "dependencies": {
@@ -520,65 +564,33 @@ def cmd_preflight(args):
                 "version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
             },
         },
-        "credentials": {},
+        "zlib": {"configured": zlib_configured},
+        "annas": {
+            "binary_found": annas_binary,
+            "api_key_configured": annas_configured,
+        },
     }
+
+    if annas_binary:
+        result["annas"]["binary_path"] = _find_annas_binary(silent=True)
 
     # Check requests
     try:
         import requests
         result["dependencies"]["requests"] = {"ok": True, "version": requests.__version__}
+        result["zlib"]["requests_installed"] = True
     except ImportError:
         result["dependencies"]["requests"] = {"ok": False, "error": "not installed"}
+        result["zlib"]["requests_installed"] = False
         result["ready"] = False
-
-    # Check annas-mcp binary
-    result["dependencies"]["annas_mcp"] = {"ok": _has_annas_binary()}
-
-    # Check credentials
-    cfg = load_config()
-    zlib_cfg = cfg.get("zlib", {})
-    result["credentials"]["zlib"] = {
-        "configured": bool(zlib_cfg.get("email") or zlib_cfg.get("remix_userid")),
-    }
-    annas_cfg = cfg.get("annas", {})
-    result["credentials"]["annas"] = {
-        "configured": bool(annas_cfg.get("secret_key")),
-    }
 
     # At least one backend must be configured
-    if not result["credentials"]["zlib"]["configured"] and not result["credentials"]["annas"]["configured"]:
+    if not zlib_configured and not annas_configured:
         result["ready"] = False
 
-    if result["ready"]:
-        output(result, hint="All checks passed. Environment is ready.")
-    else:
-        output(result, hint="Some checks failed. Review dependencies and credentials above.")
-
-
-def _has_annas_binary() -> bool:
-    try:
-        _find_annas_binary_silent()
-        return True
-    except:
-        return False
-
-
-def _find_annas_binary_silent() -> str:
-    cfg = load_config()
-    custom = cfg.get("annas", {}).get("binary_path")
-    if custom and Path(custom).exists():
-        return custom
-    for p in os.environ.get("PATH", "").split(os.pathsep):
-        candidate = Path(p) / "annas-mcp"
-        if candidate.exists():
-            return str(candidate)
-    for loc in [
-        Path.home() / ".local" / "bin" / "annas-mcp",
-        Path("/usr/local/bin/annas-mcp"),
-    ]:
-        if loc.exists():
-            return str(loc)
-    raise FileNotFoundError("annas-mcp not found")
+    hint = "All checks passed. Environment is ready." if result["ready"] else \
+           "Some checks failed. Review dependencies and credentials above."
+    output(result, hint=hint)
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +643,7 @@ def main():
     cfg_set = cfg_sub.add_parser("set", help="Set config values")
     cfg_set.add_argument("--zlib-email", help="Z-Library email")
     cfg_set.add_argument("--zlib-password", help="Z-Library password")
+    cfg_set.add_argument("--zlib-domain", help="Z-Library domain (default: 1lib.sk)")
     cfg_set.add_argument("--annas-key", help="Anna's Archive API key")
     cfg_set.add_argument("--annas-binary", help="Path to annas-mcp binary")
     cfg_set.add_argument("--annas-download-path", help="Anna's Archive download directory")
@@ -641,13 +654,12 @@ def main():
     cfg_reset = cfg_sub.add_parser("reset", help="Reset all config")
     cfg_reset.set_defaults(func=cmd_config)
 
-    # -- setup --
+    # -- setup / preflight --
     p_setup = sub.add_parser("setup", help="Check dependencies and backend status")
     p_setup.set_defaults(func=cmd_setup)
 
-    # -- preflight --
-    p_preflight = sub.add_parser("preflight", help="Check environment readiness (JSON output)")
-    p_preflight.set_defaults(func=cmd_preflight)
+    p_preflight = sub.add_parser("preflight", help="Alias for setup")
+    p_preflight.set_defaults(func=cmd_setup)
 
     args = parser.parse_args()
     args.func(args)

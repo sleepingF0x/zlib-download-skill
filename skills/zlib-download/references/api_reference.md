@@ -50,6 +50,7 @@ book.py config reset                        # Delete all config
 
 Config set options:
 - `--zlib-email` / `--zlib-password` — Z-Library credentials
+- `--zlib-domain` — Z-Library domain (default: `1lib.sk`, change if domain rotates)
 - `--annas-key` — Anna's Archive API key
 - `--annas-binary` — Path to annas-mcp binary
 - `--annas-download-path` — Download directory for Anna's Archive
@@ -62,17 +63,18 @@ Config set options:
 book.py setup                               # Check all dependencies
 ```
 
-Returns JSON with backend availability status.
+Returns JSON with `ready` boolean, dependency status, and backend availability.
 
 ## Z-Library EAPI Endpoints (via Zlibrary.py)
 
-The vendored `Zlibrary.py` communicates with `1lib.sk` using these endpoints:
+The vendored `Zlibrary.py` communicates with Z-Library EAPI (default domain: `1lib.sk`, configurable via `config set --zlib-domain`):
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | search | POST /eapi/book/search | Search books |
 | getBookInfo | GET /eapi/book/{id}/{hash} | Book metadata |
-| downloadBook | GET /eapi/book/{id}/{hash}/file | Download file |
+| downloadBook | GET /eapi/book/{id}/{hash}/file | Download file (via book dict) |
+| downloadBookById | GET /eapi/book/{id}/{hash}/file | Download file (via id + hash) |
 | getProfile | GET /eapi/user/profile | User info + download limits |
 | getMostPopular | GET /eapi/book/most-popular | Popular books |
 | getRecently | GET /eapi/book/recently | Recently added |

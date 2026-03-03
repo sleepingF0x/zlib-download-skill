@@ -2,7 +2,9 @@
 
 [English](README.md)
 
-一个 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill，用于搜索和下载书籍。支持多个后端，统一 CLI——在一个 skill 内完成从搜索到下载的全链路。
+Fork 并参考自 [psylch/zlib-download-skill](https://github.com/psylch/zlib-download-skill)。
+
+一个用于搜索和下载书籍的 agent skill，兼容任何支持 [AgentSkills](https://skills.sh) 格式的 AI 编程助手（如 Claude Code、OpenClaw 等）。支持多个后端，统一 CLI——在一个 skill 内完成从搜索到下载的全链路。
 
 | 后端 | 数据源 | 认证方式 | 适合场景 |
 |------|--------|----------|----------|
@@ -11,25 +13,30 @@
 
 ## 安装
 
-### 一键安装全部媒体技能（推荐）
-
-本技能是 [media-master](https://github.com/psylch/media-master) 的一部分，可一次安装音乐、网盘资源、书籍三个下载技能：
+### OpenClaw
 
 ```bash
-npx skills add psylch/media-master -g -y
+# 通过 ClawHub
+clawhub install zlib-download
+
+# 或手动安装
+git clone https://github.com/sleepingF0x/zlib-download-skill.git
+cp -r zlib-download-skill/skills/zlib-download ~/.openclaw/skills/
 ```
 
-### 仅安装本技能
+### Claude Code
+
+#### 仅安装本技能
 
 ```bash
-npx skills add psylch/zlib-download-skill -g -y
+npx skills add sleepingF0x/zlib-download-skill -g -y
 ```
 
-### 通过 Claude Code Plugin Marketplace
+#### 通过 Claude Code Plugin Marketplace
 
 ```shell
-/plugin marketplace add psylch/zlib-download-skill
-/plugin install zlib-download@psylch-zlib-download-skill
+/plugin marketplace add sleepingF0x/zlib-download-skill
+/plugin install zlib-download@sleepingF0x-zlib-download-skill
 ```
 
 安装后重启 Claude Code。
@@ -45,11 +52,13 @@ npx skills add psylch/zlib-download-skill -g -y
 ### 1. 配置凭证
 
 ```bash
-mkdir -p ~/.claude/book-tools
-cp ~/.agents/skills/zlib-download/scripts/.env.example ~/.claude/book-tools/.env
+mkdir -p ~/.config/book-tools
+cp ${SKILL_PATH}/scripts/.env.example ~/.config/book-tools/.env
 ```
 
-编辑 `~/.claude/book-tools/.env`，填入你的 Z-Library 邮箱和密码：
+`${SKILL_PATH}` 由 AI 助手运行时自动设置，指向 skill 的安装目录。
+
+编辑 `~/.config/book-tools/.env`，填入你的 Z-Library 邮箱和密码：
 
 ```
 ZLIB_EMAIL=your_email@example.com
@@ -61,7 +70,7 @@ ZLIB_PASSWORD=your_password_here
 ### 2.（可选）安装 Anna's Archive
 
 ```bash
-bash ~/.agents/skills/zlib-download/scripts/setup.sh install-annas
+bash ${SKILL_PATH}/scripts/setup.sh install-annas
 ```
 
 然后在 `.env` 中添加 API key（通过向 Anna's Archive 捐赠获取）：
@@ -73,12 +82,12 @@ ANNAS_SECRET_KEY=your_api_key_here
 ### 3. 验证
 
 ```bash
-python3 ~/.agents/skills/zlib-download/scripts/book.py setup
+python3 ${SKILL_PATH}/scripts/book.py setup
 ```
 
 ## 使用方式
 
-在 Claude Code 中使用以下触发短语：
+在 AI 助手中使用以下触发短语：
 
 ```
 find book about deep learning
@@ -88,13 +97,13 @@ search for machine learning textbooks
 下载这本书
 ```
 
-Skill 自动处理全流程：**搜索 → 展示结果 → 用户选择 → 下载**。
+Skill 自动处理全流程：**搜索 → 智能选择（或询问）→ 下载**。
 
 ## 工作原理
 
 1. **搜索** — 查询选定后端（或自动检测），支持语言、格式、年份过滤
-2. **展示** — 以编号表格呈现结果，按语言/版本分组
-3. **选择** — 用户报编号
+2. **智能选择** — 检查前 3 条结果；如果 3 条的 `author` 完全一致，自动选择第 1 条。
+3. **有歧义时询问** — 如果前 3 条作者不一致，展示编号表格让用户选择。
 4. **下载** — 将文件下载到 `~/Downloads/` 并报告路径和大小
 
 ### CLI 参考
@@ -118,6 +127,7 @@ python3 book.py info --source zlib --id <id> --hash <hash>
 # 配置管理
 python3 book.py config show
 python3 book.py config set --zlib-email <email> --zlib-password <pw>
+python3 book.py config set --zlib-domain <domain>   # Z-Library 域名变更时使用
 python3 book.py setup
 ```
 
@@ -125,8 +135,8 @@ python3 book.py setup
 
 | 来源 | 路径 | 优先级 |
 |------|------|--------|
-| `.env` 文件 | `~/.claude/book-tools/.env` | 高（覆盖 JSON） |
-| Config JSON | `~/.claude/book-tools/config.json` | 低（自动管理） |
+| `.env` 文件 | `~/.config/book-tools/.env` | 高（覆盖 JSON） |
+| Config JSON | `~/.config/book-tools/config.json` | 低（自动管理） |
 
 首次 Z-Library 登录成功后，remix token 会缓存到 `config.json`——后续调用直接用 token，跳过邮箱密码登录。
 
@@ -134,8 +144,10 @@ python3 book.py setup
 
 | 症状 | 修复方法 |
 |------|----------|
-| "Z-Library not configured" | 编辑 `~/.claude/book-tools/.env` 填入凭证 |
-| "Z-Library login failed" | 检查凭证。Z-Library 域名经常变更——vendored 的 `Zlibrary.py` 可能需要更新域名 |
+| "Z-Library not configured" | 编辑 `~/.config/book-tools/.env` 填入凭证 |
+| "Z-Library login failed" | 检查凭证并执行 `book.py config reset`。检查域名 DNS/网络连通性。`.env` 中的 `ZLIB_EMAIL`/`ZLIB_PASSWORD` 不要加引号。 |
+| "Z-Library download requires --id when --source zlib" | 先重新搜索，再用同一条结果的 `--id` 和 `--hash` 下载。 |
+| "Z-Library download failed: no file returned." | 常见原因是 `id/hash` 不匹配、书已下架、配额耗尽或临时网络问题。重新搜索并用匹配参数重试。 |
 | "annas-mcp binary not found" | 运行 `setup.sh install-annas` |
 | "No backend available" | 在 `.env` 中至少配置一个后端 |
 
@@ -143,8 +155,6 @@ python3 book.py setup
 
 ```
 zlib-download-skill/
-├── .claude-plugin/
-│   └── plugin.json                  # 插件清单
 ├── skills/
 │   └── zlib-download/
 │       ├── SKILL.md                 # 主 skill 定义

@@ -1,11 +1,20 @@
 ---
 name: zlib-download
-description: Search and download books from Z-Library and Anna's Archive. Use when user wants to find, search, download, or look up books, papers, or ebooks. Trigger phrases include "find book", "search book", "download book", "找书", "下载书籍", "搜书", "book search", "zlibrary", "anna's archive".
+description: Search and download books from Z-Library and Anna's Archive.
+metadata:
+  openclaw:
+    emoji: 📚
+    os: [darwin, linux]
+    allowed-tools: [Bash, Read]
+    requires:
+      bins: [python3]
 ---
 
 # Book Tools
 
 Search and download books from multiple sources through a unified CLI.
+
+**Trigger phrases**: "find book", "search book", "download book", "book search", "zlibrary", "anna's archive", "找书", "下载书籍", "搜书"
 
 ## Backends
 
@@ -24,21 +33,21 @@ On first invocation, run the setup check and guide the user through configuratio
 bash ${SKILL_PATH}/scripts/setup.sh check
 ```
 
-Output is key=value pairs. Check each:
+Output is JSON. Check the `dependencies` object:
 
-| Key | OK | Missing Action |
-|-----|----|----------------|
-| `PYTHON` | `ok` | Python 3 not found — user must install it |
-| `REQUESTS` | `ok` | Run `bash ${SKILL_PATH}/scripts/setup.sh install-deps` |
-| `ANNAS_BINARY` | `ok` | Run `bash ${SKILL_PATH}/scripts/setup.sh install-annas` (optional) |
+| Field | OK | Missing Action |
+|-------|----|----------------|
+| `dependencies.python.ok` | `true` | Python 3 not found — user must install it |
+| `dependencies.requests.ok` | `true` | Run `bash ${SKILL_PATH}/scripts/setup.sh install-deps` |
+| `dependencies.annas_mcp.ok` | `true` | Run `bash ${SKILL_PATH}/scripts/setup.sh install-annas` (optional) |
 
 ### Step 2: Configure Credentials
 
-Credentials are stored in `~/.claude/book-tools/.env`. Create the file from the skill's bundled template:
+Credentials are stored in `~/.config/book-tools/.env`. Create the file from the skill's bundled template:
 
 ```bash
-mkdir -p ~/.claude/book-tools
-cp ${SKILL_PATH}/scripts/.env.example ~/.claude/book-tools/.env
+mkdir -p ~/.config/book-tools
+cp ${SKILL_PATH}/scripts/.env.example ~/.config/book-tools/.env
 ```
 
 The `.env` file looks like this:
@@ -54,7 +63,7 @@ ZLIB_PASSWORD=your_password_here
 
 **IMPORTANT**: Do NOT ask the user for credentials directly in chat. Instead:
 1. Create the `.env` file (or `.env.example` template)
-2. Tell the user to edit `~/.claude/book-tools/.env` with their credentials
+2. Tell the user to edit `~/.config/book-tools/.env` with their credentials
 3. Wait for the user to confirm they've filled it in
 4. Then proceed with search
 
@@ -73,27 +82,27 @@ python3 ${SKILL_PATH}/scripts/book.py setup
 Expected output when Z-Library is configured:
 ```json
 {
+  "ready": true,
+  "dependencies": { "python": { "ok": true }, "requests": { "ok": true } },
   "zlib": { "requests_installed": true, "configured": true },
   "annas": { "binary_found": true, "api_key_configured": false }
 }
 ```
 
-If `configured` is `true`, the skill is ready to use.
-
-### Credential Storage Details
+If `ready` is `true`, the skill is ready to use.
 
 Two sources are merged (`.env` values take priority):
 
 | Source | Path | Format |
 |--------|------|--------|
-| `.env` file | `~/.claude/book-tools/.env` | `KEY=value` per line |
-| Config JSON | `~/.claude/book-tools/config.json` | JSON (auto-managed) |
+| `.env` file | `~/.config/book-tools/.env` | `KEY=value` per line |
+| Config JSON | `~/.config/book-tools/config.json` | JSON (auto-managed) |
 
 On first successful Z-Library login, remix tokens are cached in `config.json` — subsequent calls skip the email/password login and use tokens directly.
 
 ## Workflow
 
-The typical flow is: **search → pick → download**.
+The typical flow is: **search → smart-pick (or ask) → download**.
 
 ### 1. Search
 
@@ -132,9 +141,16 @@ python3 ${SKILL_PATH}/scripts/book.py search "莱姆 索拉里斯" --source zlib
 }
 ```
 
-### 2. Present Results to User
+### 2. Smart Pick Logic
 
-After searching, present results as a **numbered table** so the user can pick:
+After searching, apply this selection logic first:
+
+1. Use the **top 3** books from the returned order (`books[0:3]`).
+2. Compare their `author` fields (string equality).
+3. If all 3 authors are the same, **auto-select book #1** and continue to download using that book's `id` + `hash` (for zlib) or `hash` (for annas).
+4. If authors are not all the same, present results as a **numbered table** and ask the user to choose.
+
+When asking the user to choose, format as:
 
 ```
 | # | Title | Author | Year | Format | Size |
@@ -145,7 +161,7 @@ After searching, present results as a **numbered table** so the user can pick:
 
 If results span multiple languages or editions, **group them by language or category** with sub-headings for clarity.
 
-Ask: "Which book would you like to download? (number)"
+Ask: "Top 3 authors differ. Which book would you like to download? (number)"
 
 ### 3. Download
 
@@ -163,7 +179,8 @@ python3 ${SKILL_PATH}/scripts/book.py download --source annas --hash a1b2c3d4e5 
   "source": "zlib",
   "status": "ok",
   "path": "~/Downloads/Deep Learning (Ian Goodfellow).pdf",
-  "size": 23592960
+  "size": 23592960,
+  "downloads_left": 8
 }
 ```
 
@@ -200,16 +217,19 @@ python3 ${SKILL_PATH}/scripts/book.py setup
 
 | Error | Cause | Action |
 |-------|-------|--------|
-| "Z-Library not configured" | No credentials | Guide user to edit `~/.claude/book-tools/.env` |
-| "Z-Library login failed" | Bad credentials or service down | Ask user to verify credentials. Z-Library domains change — if persistent, the vendored `Zlibrary.py` domain may need updating. |
+| "Z-Library not configured" | No credentials | Guide user to edit `~/.config/book-tools/.env` |
+| "Z-Library login failed" | Bad credentials, DNS/network issues, service down, or stale token | Ask user to verify credentials and run `book.py config reset`. If password was wrapped in quotes in `.env`, remove quotes. If persistent, verify domain connectivity. |
+| "Z-Library download requires --id when --source zlib" | Download called with missing `--id` | Re-run search and pass both `--id` + `--hash` from the same search result. |
+| "Z-Library download failed: no file returned." | `id/hash` mismatch, book unavailable, quota exhausted, or network issue | Re-run search, verify `id/hash`, optionally run `info` first, then retry download. |
 | "annas-mcp binary not found" | Binary not installed | Run `setup.sh install-annas` |
 | "Anna's Archive API key not configured" | No API key | Guide user to donate at Anna's Archive for API access, then add key to `.env` |
-| Search timeout | Network issue | Retry once. If persistent, try the other backend. |
+| Search timeout | Network issue | Automatic retry is built in. If still failing, try the other backend. |
 | "No backend available" | Neither backend configured | Walk through full setup flow from Step 1 |
 
 ## Tips
 
 - Z-Library has a daily download limit (usually 10/day for free accounts). Use `info` to check a book before downloading to avoid wasting quota.
+- In `.env`, do not wrap `ZLIB_EMAIL` / `ZLIB_PASSWORD` values with quotes.
 - Anna's Archive requires an API key for both search and download (obtained via donation).
 - For Chinese books, use `--lang chinese` with Z-Library for best results.
 - If Z-Library is unreachable, automatically fall back to Anna's Archive with `--source auto`.

@@ -2,7 +2,9 @@
 
 [中文文档](README.zh.md)
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for searching and downloading books. Supports multiple backends with a unified CLI — full workflow from search to download in one skill.
+Forked from and inspired by [psylch/zlib-download-skill](https://github.com/psylch/zlib-download-skill).
+
+An agent skill for searching and downloading books. Compatible with any AI coding assistant that supports the [AgentSkills](https://skills.sh) format (e.g. Claude Code, OpenClaw, etc.). Supports multiple backends with a unified CLI — full workflow from search to download in one skill.
 
 | Backend | Source | Auth | Best For |
 |---------|--------|------|----------|
@@ -11,25 +13,30 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for search
 
 ## Installation
 
-### Install all media skills at once (recommended)
-
-This skill is part of [media-master](https://github.com/psylch/media-master), which bundles music, cloud drive, and book download skills:
+### OpenClaw
 
 ```bash
-npx skills add psylch/media-master -g -y
+# Via ClawHub
+clawhub install zlib-download
+
+# Or manually
+git clone https://github.com/sleepingF0x/zlib-download-skill.git
+cp -r zlib-download-skill/skills/zlib-download ~/.openclaw/skills/
 ```
 
-### Install this skill only
+### Claude Code
+
+#### Install this skill only
 
 ```bash
-npx skills add psylch/zlib-download-skill -g -y
+npx skills add sleepingF0x/zlib-download-skill -g -y
 ```
 
-### Via Claude Code Plugin Marketplace
+#### Via Claude Code Plugin Marketplace
 
 ```shell
-/plugin marketplace add psylch/zlib-download-skill
-/plugin install zlib-download@psylch-zlib-download-skill
+/plugin marketplace add sleepingF0x/zlib-download-skill
+/plugin install zlib-download@sleepingF0x-zlib-download-skill
 ```
 
 Restart Claude Code after installation.
@@ -45,11 +52,13 @@ Restart Claude Code after installation.
 ### 1. Configure Credentials
 
 ```bash
-mkdir -p ~/.claude/book-tools
-cp ~/.agents/skills/zlib-download/scripts/.env.example ~/.claude/book-tools/.env
+mkdir -p ~/.config/book-tools
+cp ${SKILL_PATH}/scripts/.env.example ~/.config/book-tools/.env
 ```
 
-Edit `~/.claude/book-tools/.env` with your Z-Library email and password:
+`${SKILL_PATH}` is automatically set by the agent runtime and points to the skill's installation directory.
+
+Edit `~/.config/book-tools/.env` with your Z-Library email and password:
 
 ```
 ZLIB_EMAIL=your_email@example.com
@@ -61,7 +70,7 @@ ZLIB_PASSWORD=your_password_here
 ### 2. (Optional) Install Anna's Archive
 
 ```bash
-bash ~/.agents/skills/zlib-download/scripts/setup.sh install-annas
+bash ${SKILL_PATH}/scripts/setup.sh install-annas
 ```
 
 Then add your API key (obtained via donation to Anna's Archive) to `.env`:
@@ -73,12 +82,12 @@ ANNAS_SECRET_KEY=your_api_key_here
 ### 3. Verify
 
 ```bash
-python3 ~/.agents/skills/zlib-download/scripts/book.py setup
+python3 ${SKILL_PATH}/scripts/book.py setup
 ```
 
 ## Usage
 
-In Claude Code, use any of these trigger phrases:
+Use any of these trigger phrases in your AI assistant:
 
 ```
 find book about deep learning
@@ -88,13 +97,13 @@ search for machine learning textbooks
 下载这本书
 ```
 
-The skill handles the full workflow: **search → present results → user picks → download**.
+The skill handles the full workflow: **search → smart-pick (or ask) → download**.
 
 ## How It Works
 
 1. **Search** — queries the selected backend (or auto-detects) with filters (language, format, year)
-2. **Present** — shows results as a numbered table grouped by language/edition
-3. **Pick** — user selects by number
+2. **Smart-pick** — checks top 3 results. If all 3 `author` values are identical, auto-picks #1.
+3. **Ask when ambiguous** — if top 3 authors differ, presents a numbered table and asks the user to choose.
 4. **Download** — fetches the file to `~/Downloads/` and reports path + size
 
 ### CLI Reference
@@ -118,6 +127,7 @@ python3 book.py info --source zlib --id <id> --hash <hash>
 # Config management
 python3 book.py config show
 python3 book.py config set --zlib-email <email> --zlib-password <pw>
+python3 book.py config set --zlib-domain <domain>   # if Z-Library domain changes
 python3 book.py setup
 ```
 
@@ -125,8 +135,8 @@ python3 book.py setup
 
 | Source | Path | Priority |
 |--------|------|----------|
-| `.env` file | `~/.claude/book-tools/.env` | Higher (overrides JSON) |
-| Config JSON | `~/.claude/book-tools/config.json` | Lower (auto-managed) |
+| `.env` file | `~/.config/book-tools/.env` | Higher (overrides JSON) |
+| Config JSON | `~/.config/book-tools/config.json` | Lower (auto-managed) |
 
 On first successful Z-Library login, remix tokens are cached in `config.json` — subsequent calls use tokens directly, skipping email/password login.
 
@@ -134,8 +144,10 @@ On first successful Z-Library login, remix tokens are cached in `config.json` �
 
 | Symptom | Fix |
 |---------|-----|
-| "Z-Library not configured" | Edit `~/.claude/book-tools/.env` with credentials |
-| "Z-Library login failed" | Verify credentials. Z-Library domains change frequently — vendored `Zlibrary.py` may need a domain update |
+| "Z-Library not configured" | Edit `~/.config/book-tools/.env` with credentials |
+| "Z-Library login failed" | Verify credentials and run `book.py config reset`. Check DNS/network to domain. Avoid quoting `ZLIB_EMAIL`/`ZLIB_PASSWORD` values in `.env`. |
+| "Z-Library download requires --id when --source zlib" | Re-run search and pass both `--id` and `--hash` from the same search result. |
+| "Z-Library download failed: no file returned." | Usually `id/hash` mismatch, unavailable book, quota exhaustion, or transient network issue. Re-run search and retry with matching `id/hash`. |
 | "annas-mcp binary not found" | Run `setup.sh install-annas` |
 | "No backend available" | Configure at least one backend in `.env` |
 
@@ -143,8 +155,6 @@ On first successful Z-Library login, remix tokens are cached in `config.json` �
 
 ```
 zlib-download-skill/
-├── .claude-plugin/
-│   └── plugin.json                  # Plugin manifest
 ├── skills/
 │   └── zlib-download/
 │       ├── SKILL.md                 # Main skill definition

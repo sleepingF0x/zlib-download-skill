@@ -13,6 +13,9 @@ https://github.com/bipinkrish/Zlibrary-API/
 import requests
 
 
+DEFAULT_TIMEOUT = 30
+
+
 class Zlibrary:
     def __init__(
         self,
@@ -20,13 +23,14 @@ class Zlibrary:
         password: str = None,
         remix_userid: [int, str] = None,
         remix_userkey: str = None,
+        domain: str = None,
     ):
         self.__email: str
         self.__name: str
         self.__kindle_email: str
         self.__remix_userid: [int, str]
         self.__remix_userkey: str
-        self.__domain = "1lib.sk"
+        self.__domain = domain or "1lib.sk"
 
         self.__loggedin = False
         self.__headers = {
@@ -96,12 +100,16 @@ class Zlibrary:
             print("Not logged in")
             return
 
-        return requests.post(
-            "https://" + self.__domain + url,
-            data=data,
-            cookies=self.__cookies,
-            headers=self.__headers,
-        ).json()
+        try:
+            return requests.post(
+                "https://" + self.__domain + url,
+                data=data,
+                cookies=self.__cookies,
+                headers=self.__headers,
+                timeout=DEFAULT_TIMEOUT,
+            ).json()
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": str(e)}
 
     def __makeGetRequest(
         self, url: str, params: dict = {}, cookies=None
@@ -110,12 +118,16 @@ class Zlibrary:
             print("Not logged in")
             return
 
-        return requests.get(
-            "https://" + self.__domain + url,
-            params=params,
-            cookies=self.__cookies if cookies is None else cookies,
-            headers=self.__headers,
-        ).json()
+        try:
+            return requests.get(
+                "https://" + self.__domain + url,
+                params=params,
+                cookies=self.__cookies if cookies is None else cookies,
+                headers=self.__headers,
+                timeout=DEFAULT_TIMEOUT,
+            ).json()
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": str(e)}
 
     def getProfile(self) -> dict[str, str]:
         return self.__makeGetRequest("/eapi/user/profile")
@@ -291,11 +303,13 @@ class Zlibrary:
 
     def __getBookFile(self, bookid: [int, str], hashid: str) -> [(str, bytes), None]:
         response = self.__makeGetRequest(f"/eapi/book/{bookid}/{hashid}/file")
+        if not response or not response.get("file"):
+            return None
         filename = response["file"]["description"]
 
         try:
             filename += " (" + response["file"]["author"] + ")"
-        except:
+        except (KeyError, TypeError):
             pass
         finally:
             filename += "." + response["file"]["extension"]
@@ -304,12 +318,19 @@ class Zlibrary:
         headers = self.__headers.copy()
         headers["authority"] = ddl.split("/")[2]
 
-        res = requests.get(ddl, headers=headers)
-        if res.status_code == 200:
-            return filename, res.content
+        try:
+            res = requests.get(ddl, headers=headers, timeout=120)
+            if res.status_code == 200:
+                return filename, res.content
+        except requests.exceptions.RequestException:
+            return None
 
     def downloadBook(self, book: dict[str, str]) -> [(str, bytes), None]:
         return self.__getBookFile(book["id"], book["hash"])
+
+    def downloadBookById(self, bookid: [int, str], hashid: str) -> [(str, bytes), None]:
+        """Public method to download a book by ID and hash."""
+        return self.__getBookFile(bookid, hashid)
 
     def isLoggedIn(self) -> bool:
         return self.__loggedin

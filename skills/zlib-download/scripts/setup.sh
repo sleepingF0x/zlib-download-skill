@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # setup.sh - Check and install dependencies for book-tools skill
 #
+# Config stored at ~/.config/book-tools/ (platform-neutral).
+#
 # Usage:
 #   bash setup.sh check          # Check all dependencies (JSON output)
 #   bash setup.sh install-annas  # Download and install annas-mcp binary
@@ -10,6 +12,7 @@ set -euo pipefail
 
 ANNAS_VERSION="v0.0.4"
 INSTALL_DIR="$HOME/.local/bin"
+CONFIG_DIR="$HOME/.config/book-tools"
 
 # ── JSON output helpers ──────────────────────────────────────────────
 
@@ -64,6 +67,12 @@ do_check() {
     if [ "$python_ok" = false ]; then ready=false; fi
     if [ "$requests_ok" = false ]; then ready=false; fi
 
+    # Check .env file in detected config dir
+    local env_ok=false
+    if [ -f "$CONFIG_DIR/.env" ]; then
+        env_ok=true
+    fi
+
     local python_json
     if [ "$python_ok" = true ]; then
         python_json="{\"ok\":true,\"path\":\"$python_path\",\"version\":\"$python_ver\"}"
@@ -85,6 +94,13 @@ do_check() {
         annas_json='{"ok":false,"error":"not found"}'
     fi
 
+    local env_json
+    if [ "$env_ok" = true ]; then
+        env_json="{\"ok\":true,\"path\":\"$CONFIG_DIR/.env\"}"
+    else
+        env_json="{\"ok\":false,\"error\":\"not found\",\"hint\":\"Create $CONFIG_DIR/.env from .env.example\"}"
+    fi
+
     local hint
     if [ "$ready" = true ]; then
         hint="All core dependencies are available."
@@ -92,7 +108,7 @@ do_check() {
         hint="Run: bash setup.sh install-deps to install missing Python packages."
     fi
 
-    echo "{\"ready\":$ready,\"dependencies\":{\"python\":$python_json,\"requests\":$requests_json,\"annas_mcp\":$annas_json},\"hint\":\"$hint\"}"
+    echo "{\"ready\":$ready,\"config_dir\":\"$CONFIG_DIR\",\"dependencies\":{\"python\":$python_json,\"requests\":$requests_json,\"annas_mcp\":$annas_json},\"env_file\":$env_json,\"hint\":\"$hint\"}"
     exit 0
 }
 
