@@ -63,6 +63,8 @@ cp ${SKILL_PATH}/scripts/.env.example ~/.config/book-tools/.env
 ```
 ZLIB_EMAIL=your_email@example.com
 ZLIB_PASSWORD=your_password_here
+# 可选：覆盖 Z-Library 域名
+# ZLIB_DOMAIN=1lib.sk
 ```
 
 > **重要**：不要在聊天中直接提供凭证。skill 只从 `.env` 文件读取。
@@ -145,7 +147,7 @@ python3 book.py setup
 | 症状 | 修复方法 |
 |------|----------|
 | "Z-Library not configured" | 编辑 `~/.config/book-tools/.env` 填入凭证 |
-| "Z-Library login failed" | 检查凭证并执行 `book.py config reset`。检查域名 DNS/网络连通性。`.env` 中的 `ZLIB_EMAIL`/`ZLIB_PASSWORD` 不要加引号。 |
+| "Z-Library login failed" | 检查凭证并执行 `book.py config reset`。检查域名 DNS/网络连通性。`.env` 中的 `ZLIB_EMAIL`/`ZLIB_PASSWORD`/`ZLIB_DOMAIN` 不要加引号。 |
 | "Z-Library download requires --id when --source zlib" | 先重新搜索，再用同一条结果的 `--id` 和 `--hash` 下载。 |
 | "Z-Library download failed: no file returned." | 常见原因是 `id/hash` 不匹配、书已下架、配额耗尽或临时网络问题。重新搜索并用匹配参数重试。 |
 | "annas-mcp binary not found" | 运行 `setup.sh install-annas` |

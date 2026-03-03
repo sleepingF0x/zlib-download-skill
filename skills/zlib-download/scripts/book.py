@@ -64,6 +64,9 @@ def load_config() -> dict:
             cfg["zlib"]["email"] = env["ZLIB_EMAIL"]
         if env.get("ZLIB_PASSWORD"):
             cfg["zlib"]["password"] = env["ZLIB_PASSWORD"]
+    if env.get("ZLIB_DOMAIN"):
+        cfg.setdefault("zlib", {})
+        cfg["zlib"]["domain"] = env["ZLIB_DOMAIN"]
     if env.get("ANNAS_SECRET_KEY"):
         cfg.setdefault("annas", {})
         cfg["annas"]["secret_key"] = env["ANNAS_SECRET_KEY"]

@@ -56,6 +56,8 @@ The `.env` file looks like this:
 # Z-Library credentials
 ZLIB_EMAIL=your_email@example.com
 ZLIB_PASSWORD=your_password_here
+# Optional: override Z-Library domain
+# ZLIB_DOMAIN=1lib.sk
 
 # Anna's Archive (optional, requires donation for API key)
 # ANNAS_SECRET_KEY=your_api_key_here
@@ -218,7 +220,7 @@ python3 ${SKILL_PATH}/scripts/book.py setup
 | Error | Cause | Action |
 |-------|-------|--------|
 | "Z-Library not configured" | No credentials | Guide user to edit `~/.config/book-tools/.env` |
-| "Z-Library login failed" | Bad credentials, DNS/network issues, service down, or stale token | Ask user to verify credentials and run `book.py config reset`. If password was wrapped in quotes in `.env`, remove quotes. If persistent, verify domain connectivity. |
+| "Z-Library login failed" | Bad credentials, DNS/network issues, service down, or stale token | Ask user to verify credentials and run `book.py config reset`. If `ZLIB_EMAIL` / `ZLIB_PASSWORD` / `ZLIB_DOMAIN` was wrapped in quotes in `.env`, remove quotes. If persistent, verify domain connectivity. |
 | "Z-Library download requires --id when --source zlib" | Download called with missing `--id` | Re-run search and pass both `--id` + `--hash` from the same search result. |
 | "Z-Library download failed: no file returned." | `id/hash` mismatch, book unavailable, quota exhausted, or network issue | Re-run search, verify `id/hash`, optionally run `info` first, then retry download. |
 | "annas-mcp binary not found" | Binary not installed | Run `setup.sh install-annas` |
@@ -229,7 +231,7 @@ python3 ${SKILL_PATH}/scripts/book.py setup
 ## Tips
 
 - Z-Library has a daily download limit (usually 10/day for free accounts). Use `info` to check a book before downloading to avoid wasting quota.
-- In `.env`, do not wrap `ZLIB_EMAIL` / `ZLIB_PASSWORD` values with quotes.
+- In `.env`, do not wrap `ZLIB_EMAIL` / `ZLIB_PASSWORD` / `ZLIB_DOMAIN` values with quotes.
 - Anna's Archive requires an API key for both search and download (obtained via donation).
 - For Chinese books, use `--lang chinese` with Z-Library for best results.
 - If Z-Library is unreachable, automatically fall back to Anna's Archive with `--source auto`.

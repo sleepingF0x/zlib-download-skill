@@ -51,6 +51,7 @@ book.py config reset                        # Delete all config
 Config set options:
 - `--zlib-email` / `--zlib-password` — Z-Library credentials
 - `--zlib-domain` — Z-Library domain (default: `1lib.sk`, change if domain rotates)
+  - You can also set `ZLIB_DOMAIN` in `~/.config/book-tools/.env` (env value overrides config JSON).
 - `--annas-key` — Anna's Archive API key
 - `--annas-binary` — Path to annas-mcp binary
 - `--annas-download-path` — Download directory for Anna's Archive
@@ -67,7 +68,7 @@ Returns JSON with `ready` boolean, dependency status, and backend availability.
 
 ## Z-Library EAPI Endpoints (via Zlibrary.py)
 
-The vendored `Zlibrary.py` communicates with Z-Library EAPI (default domain: `1lib.sk`, configurable via `config set --zlib-domain`):
+The vendored `Zlibrary.py` communicates with Z-Library EAPI (default domain: `1lib.sk`, configurable via `config set --zlib-domain` or `.env` `ZLIB_DOMAIN`):
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|

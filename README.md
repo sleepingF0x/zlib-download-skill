@@ -63,6 +63,8 @@ Edit `~/.config/book-tools/.env` with your Z-Library email and password:
 ```
 ZLIB_EMAIL=your_email@example.com
 ZLIB_PASSWORD=your_password_here
+# Optional: override Z-Library domain
+# ZLIB_DOMAIN=1lib.sk
 ```
 
 > **Important**: Do not share credentials in chat. The skill reads them from the `.env` file only.
@@ -145,7 +147,7 @@ On first successful Z-Library login, remix tokens are cached in `config.json` â€
 | Symptom | Fix |
 |---------|-----|
 | "Z-Library not configured" | Edit `~/.config/book-tools/.env` with credentials |
-| "Z-Library login failed" | Verify credentials and run `book.py config reset`. Check DNS/network to domain. Avoid quoting `ZLIB_EMAIL`/`ZLIB_PASSWORD` values in `.env`. |
+| "Z-Library login failed" | Verify credentials and run `book.py config reset`. Check DNS/network to domain. Avoid quoting `ZLIB_EMAIL`/`ZLIB_PASSWORD`/`ZLIB_DOMAIN` values in `.env`. |
 | "Z-Library download requires --id when --source zlib" | Re-run search and pass both `--id` and `--hash` from the same search result. |
 | "Z-Library download failed: no file returned." | Usually `id/hash` mismatch, unavailable book, quota exhaustion, or transient network issue. Re-run search and retry with matching `id/hash`. |
 | "annas-mcp binary not found" | Run `setup.sh install-annas` |
